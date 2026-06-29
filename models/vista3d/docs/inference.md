@@ -85,3 +85,73 @@ This result is benchmarked under:
  - Python version:3.10.12
  - CUDA version: 12.6
  - GPU models and configuration: A100 80G
+
+---
+
+## Execute inference on AMD MI300X (ROCm)
+
+Run the bundle with the `inference_amd.json` overlay. Use a local (non-NFS) cache dir and do
+not run as root (the MIOpen cache is SQLite-backed and breaks on NFS / as read-only root).
+
+These environment variables are required (`PYTORCH_MIOPEN_SUGGEST_NHWC` and the MIOpen
+`FIND` variables must be set **before** `python` starts — MIOpen latches them at import):
+
+```bash
+cd models/vista3d
+
+ulimit -n 1048576
+export PYTORCH_MIOPEN_SUGGEST_NHWC=1
+export MIOPEN_USER_DB_PATH=/tmp/miopen_cache_$USER
+export MIOPEN_CUSTOM_CACHE_DIR=/tmp/miopen_cache_$USER
+export TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_cache_$USER
+export TORCHINDUCTOR_MAX_AUTOTUNE=1
+export TORCHINDUCTOR_MAX_AUTOTUNE_GEMM=1
+export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+export TORCHINDUCTOR_EPILOGUE_FUSION=1
+export TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS=ATEN,TRITON
+```
+
+### One-time MIOpen tuning (required for full speed)
+
+On a fresh cache MIOpen selects the fast XDLOPS conv solver but runs it with **default,
+untuned kernel parameters** (~865 ms/inference). To populate the MIOpen perf-database with
+tuned parameters, run **once** with exhaustive find enabled (`FIND_ENFORCE=4` = re-tune and
+write). This is slow (the first inference does the full solver search) but only needs to be
+done once per cache — the tuned perf-db persists on disk and is reused by all later runs.
+
+```bash
+MIOPEN_FIND_MODE=1 MIOPEN_FIND_ENFORCE=4 \
+python -m monai.bundle run \
+  --config_file "['configs/inference.json', 'configs/inference_amd.json']" \
+  --input_dict "{'image': '/abs/path/to/Task09_Spleen/imagesTr/spleen_10.nii.gz', 'label_prompt': [3]}"
+```
+
+### Run
+
+After the cache is tuned, run normally (no `FIND_ENFORCE`):
+
+```bash
+python -m monai.bundle run \
+  --config_file "['configs/inference.json', 'configs/inference_amd.json']" \
+  --input_dict "{'image': '/abs/path/to/Task09_Spleen/imagesTr/spleen_10.nii.gz', 'label_prompt': [3]}"
+```
+
+The inferer prints `[Vista3dInferer] inference time: X ms` per call. The first inference in
+each new process is slow (`torch.compile` re-traces per process; not cacheable across
+processes on ROCm); subsequent inferences in the same process run at full speed.
+
+### Steady-state results (MI300X, BTCV spleen_10, 334x300x181 volume)
+
+| MIOpen perf-db state | steady-state inference |
+| :--- | :---: |
+| untuned (fresh cache, default solver params) | ~865 ms |
+| tuned once with `FIND_ENFORCE=4` (this recipe) | **~540 ms** |
+
+If steady-state is in the **seconds** (not ~0.5–0.9 s), MIOpen fell back to the naive conv
+kernel. Confirm the fast solver with MIOpen logging:
+
+```bash
+MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 python -m monai.bundle run ... 2>miopen.log
+grep -E 'FW Chosen Algorithm' miopen.log | sort | uniq -c
+# fast (correct): ConvHipImplicitGemm   |   slow (fallback): ConvDirectNaiveConvFwd
+```

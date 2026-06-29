@@ -10,6 +10,7 @@
 # limitations under the License.
 
 import copy
+import time
 from typing import List, Union
 
 import torch
@@ -78,6 +79,8 @@ class Vista3dInferer(Inferer):
                 class_vector = None
         val_outputs = None
         torch.cuda.empty_cache()
+        torch.cuda.synchronize()
+        _t0 = time.perf_counter()
         if self.use_point_window and point_coords is not None:
             if isinstance(inputs, list):
                 device = inputs[0].device
@@ -117,4 +120,7 @@ class Vista3dInferer(Inferer):
                 labels=labels,
                 label_set=label_set,
             )
+        torch.cuda.synchronize()
+        _elapsed_ms = (time.perf_counter() - _t0) * 1000
+        print(f"[Vista3dInferer] inference time: {_elapsed_ms:.1f} ms", flush=True)
         return val_outputs
