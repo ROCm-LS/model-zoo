@@ -155,3 +155,98 @@ MIOPEN_ENABLE_LOGGING=1 MIOPEN_LOG_LEVEL=6 python -m monai.bundle run ... 2>miop
 grep -E 'FW Chosen Algorithm' miopen.log | sort | uniq -c
 # fast (correct): ConvHipImplicitGemm   |   slow (fallback): ConvDirectNaiveConvFwd
 ```
+
+---
+
+## Compilation strategy: compile the whole network (not just the encoder)
+
+The `inference_amd.json` overlay wraps the **whole network** with `torch.compile(@network)`.
+NVIDIA's TensorRT overlay (`inference_trt.json`) compiles only the `image_encoder.encoder`
+submodule, because TensorRT cannot ingest VISTA3D's branchy `forward` (data-dependent `if`s,
+`.item()`/`.any()` breaks, variable-size prompt heads). That is a TensorRT constraint, **not**
+a general one — `torch.compile` handles branches via graph breaks + guards, so on the AMD
+`torch.compile` path there is no reason to restrict compilation to the encoder.
+
+### Why whole-model is the right choice
+
+Measured on MI300X (bf16, points path unless noted), encoder-only vs whole-model:
+
+| path | whole-model | encoder-only | delta |
+| :--- | :---: | :---: | :---: |
+| **label_prompt (production)** | **873 ms** | 1625 ms | whole-model **86% faster** |
+| points (interactive) | 153 ms | 149 ms | tie (noise) |
+
+Encoder-only leaves the SegResNet-DS decoder + segmentation heads running eager, which nearly
+doubles latency on the production label_prompt path. Whole-model captures the decoder speedup.
+
+Correctness is preserved. The anchored Dice gate (`dice_equivalence.py --model vista3d
+--fp32-gate`) passes for whole-model bf16 compile: fp32 reference is bit-equal to the
+`monai.bundle run` golden, and every rung is Dice ≥ 0.99 vs reference (bf16+compile = 0.9990,
+bf16+compile+wedge = 0.9990).
+
+### Recompilation is bounded — safe at scale
+
+`forward` is **not** one monolithic compiled graph. Dynamo splits it at each untraceable
+branch (graph break), producing many independently-compiled subgraphs
+(`torch_dynamo_resume_in_forward_at_<line>`). The `torch._dynamo` `recompile_limit` (default
+**8**) is **per code-object, not per model**: each compiled function may recompile up to 8
+times (once per new tensor shape/stride/dtype it sees) before that one function permanently
+falls back to eager. Different code objects have independent counters.
+
+### Label-prompt path needs far fewer compilations than the points path
+
+The two prompt types exercise different inferers and therefore different recompilation
+profiles:
+
+- **label_prompt (automatic)** routes through `SlidingWindowInfererAdapt`, which **pads every
+  window to a fixed 128³**. The tensor reaching the compiled `forward` is the same shape for
+  every image, so Dynamo compiles once and reuses it — measured **~0–1 recompiles** across 61
+  distinct images.
+- **points (interactive)** routes through `point_based_window_inferer`, which crops
+  **variable-size** windows around each click. The compiled `forward` sees several distinct
+  shapes during warmup — measured ~43 recompiles (still bounded; see below).
+
+So a **label-prompt-only deployment recompiles far less** than one that also serves interactive
+point prompts. If you only need automatic class-based segmentation, the points path (and its
+compilation cost) is never exercised.
+
+> Note: the stock mainline bundle's points path raises `TypeError: expected np.ndarray (got
+> Tensor)` at `scripts/evaluator.py` (`torch.from_numpy(points)`) on current PyTorch/NumPy,
+> because the preceding `transform_points` now returns a Tensor. This is a pre-existing
+> upstream bug independent of the AMD optimizations, and it does not affect the label_prompt
+> path. The measurements below used a local `torch.as_tensor(points)` workaround, which is
+> **not** shipped in this overlay (we keep `scripts/` identical to mainline).
+
+Recompilation was stress-tested on the points path (the only path with variable-size crop
+windows; the label_prompt path pads every window to 128³, so it recompiles ~0–1 times):
+
+| dataset | distinct volumes | in-plane shape classes | Z-depths | total recompiles | last recompile | any function > 8? |
+| :--- | :---: | :---: | :---: | :---: | :---: | :---: |
+| Task09 Spleen | 61 | 1 | 31–168 | 45 | image 5 | no |
+| AMOS22 (multi-scanner) | 300 | 2 (512², 768²) | 68–353 | 43 | image 2 | no |
+| TotalSegmentator | 1228 | 493 | 29–851 | 43 | image 2 | no |
+
+Across 1228 distinct CTs from 493 in-plane resolution classes (cold cache), recompilation
+converges by **image 2** and never recurs. The 43 total is summed over 22 distinct functions;
+**exactly one** — `copy_meta_from` (MONAI meta-tensor plumbing, `meta_obj.py:122`, not a
+compute kernel) — reaches the cap of 8 and falls back to eager harmlessly. The encoder
+(`segresnet_ds`) tops out at 5/8 and stays compiled. Recompilation is bounded by the number of
+distinct **tensor shapes** (small, because resampling + fixed 128³ crop windows collapse all
+images into a few shapes), **not** by image count — so 1000+ images behave identically to 300.
+
+### Graceful-degradation floor
+
+Because the limit is per-function, whole-model compile can only degrade **toward** encoder-only,
+never below it. Worst case (pathological input diversity pushing every branchy function to its
+cap): the branchy heads fall back to eager but the encoder — a clean CNN with stable shapes —
+stays compiled, matching NVIDIA's encoder-only baseline. Best case (what actually happens): the
+branchy parts also compile and stay compiled. There is no scenario where whole-model is slower
+than encoder-only, which makes compiling the whole network a free option.
+
+### Cold-start cost
+
+The disk caches (`TORCHINDUCTOR_CACHE_DIR`, MIOpen `USER_DB`/`CUSTOM_CACHE_DIR`) affect only
+one-time warmup compile *time*, not recompile count or steady-state latency. Cold cache: first
+inference ~100 s (full inductor autotune), second ~50 s, total warmup ~150 s; then flat
+steady-state. Persist the cache dirs on durable (non-NFS, non-root) storage to cut warmup to
+~55 s on subsequent process starts. Either way it is a fixed startup tax, fully amortized.
