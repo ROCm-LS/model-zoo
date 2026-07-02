@@ -1,0 +1,29 @@
+{
+    "+imports": [
+        "$import torch"
+    ],
+    "network_def": {
+        "_target_": "SwinUNETR",
+        "spatial_dims": 3,
+        "in_channels": 1,
+        "out_channels": 14,
+        "feature_size": 48,
+        "use_checkpoint": false
+    },
+    "network": "$@network_def.to(@device).to(memory_format=torch.channels_last_3d)",
+    "checkpointloader": {
+        "_target_": "CheckpointLoader",
+        "load_path": "$@checkpoint",
+        "load_dict": {
+            "model": "@network_def"
+        },
+        "map_location": "@device"
+    },
+    "initialize": [
+        "$monai.utils.set_determinism(seed=123)",
+        "$setattr(torch.backends.cudnn, 'deterministic', False)",
+        "$setattr(@evaluator, 'amp_kwargs', {'dtype': torch.bfloat16})",
+        "$@checkpointloader(@evaluator)",
+        "$setattr(@evaluator, 'network', torch.compile(@network))"
+    ]
+}
