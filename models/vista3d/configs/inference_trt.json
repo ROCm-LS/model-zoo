@@ -6,7 +6,7 @@
     "max_prompt_size": 4,
     "head_trt_enabled": false,
     "network_trt_args": {
-        "dynamic_batchsize": "$[1, @inferer#sw_batch_size, @inferer#sw_batch_size]"
+        "dynamic_batchsize": "$[1, @base_inferer#sw_batch_size, @base_inferer#sw_batch_size]"
     },
     "network_dev": "$@network_def.to(@device)",
     "encoder": "$trt_compile(@network_dev, @bundle_root + '/models/model.pt' if not @base_path else @base_path, args=@network_trt_args, submodule=['image_encoder.encoder'])",
