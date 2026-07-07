@@ -10,11 +10,7 @@
 # limitations under the License.
 
 import copy
-import time
 from typing import List, Union
-
-WARMUP = 5
-MEASURE = 20
 
 import torch
 from monai.apps.vista3d.inferer import point_based_window_inferer
@@ -37,21 +33,6 @@ class Vista3dInferer(Inferer):
         self.overlap = overlap
         self.sw_batch_size = sw_batch_size
         self.use_point_window = use_point_window
-        self._timed_calls: list = []
-        self._call_count: int = 0
-
-    def summary(self) -> None:
-        if not self._timed_calls:
-            print("[Vista3dInferer] no measured calls recorded")
-            return
-        sorted_t = sorted(self._timed_calls)
-        n = len(sorted_t)
-        median = sorted_t[n // 2] * 1000
-        mean = sum(sorted_t) / n * 1000
-        print(
-            f"[Vista3dInferer] {WARMUP} warmup + {n} measured | "
-            f"median {median:.2f} ms | mean {mean:.2f} ms"
-        )
 
     def __call__(
         self,
@@ -80,13 +61,6 @@ class Vista3dInferer(Inferer):
             prev_mask: [1, B, H, W, D], THE VALUE IS BEFORE SIGMOID!
 
         """
-        self._call_count += 1
-        is_warmup = self._call_count <= WARMUP
-
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        _t0 = time.perf_counter()
-
         prompt_class = copy.deepcopy(class_vector)
         if class_vector is not None and (point_labels is not None and torch.any(point_labels != -1)):
             # Only when user perform zero-shot interactive during inference. Remove the class vector
@@ -128,10 +102,6 @@ class Vista3dInferer(Inferer):
                 labels=labels,
                 label_set=label_set,
             )
-            print(f"[Vista3dInferer] point_window -> ")
-            print(f"[Vista3dInferer] point_window -> ")
-            print(f"[Vista3dInferer] point_window -> ")
-            print(f"[Vista3dInferer] point_window -> ")
         else:
             val_outputs = SlidingWindowInfererAdapt(
                 roi_size=self.roi_size, sw_batch_size=self.sw_batch_size, with_coord=True, padding_mode="replicate"
@@ -147,14 +117,4 @@ class Vista3dInferer(Inferer):
                 labels=labels,
                 label_set=label_set,
             )
-            print(f"[SlidingWindowInfererAdapt] point_window -> ")
-            print(f"[SlidingWindowInfererAdapt] point_window -> ")
-            
-        if torch.cuda.is_available():
-            torch.cuda.synchronize()
-        elapsed = time.perf_counter() - _t0
-        tag = "warmup" if is_warmup else "measured"
-        print(f"[Vista3dInferer] call #{self._call_count} ({tag}): {elapsed * 1000:.2f} ms")
-        if not is_warmup:
-            self._timed_calls.append(elapsed)
         return val_outputs
