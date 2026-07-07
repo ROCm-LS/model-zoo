@@ -199,6 +199,7 @@
         "$@checkpointloader(@evaluator)"
     ],
     "run": [
-        "$@evaluator.run()"
+        "$@evaluator.run()",
+        "$@inferer.summary()"
     ]
 }
