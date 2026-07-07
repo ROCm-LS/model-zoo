@@ -121,12 +121,16 @@
         "shuffle": false,
         "num_workers": 0
     },
-    "inferer": {
+    "base_inferer": {
         "_target_": "scripts.inferer.Vista3dInferer",
         "roi_size": "@patch_size",
         "overlap": 0.3,
         "sw_batch_size": "@sw_batch_size",
         "use_point_window": "@use_point_window"
+    },
+    "inferer": {
+        "_target_": "scripts.timed_inferer.TimedInferer",
+        "inferer": "@base_inferer"
     },
     "postprocessing": {
         "_target_": "Compose",
@@ -199,6 +203,7 @@
         "$@checkpointloader(@evaluator)"
     ],
     "run": [
-        "$@evaluator.run()"
+        "$@evaluator.run()",
+        "$@inferer.summary()"
     ]
 }
