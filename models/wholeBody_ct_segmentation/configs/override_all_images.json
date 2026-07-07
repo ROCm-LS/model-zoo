@@ -1,0 +1,5 @@
+{
+  "dataset_dir": "/home/AMD/nilapate/Domains_SDK_Utils/silo-engagement/data/btcv/Task09_Spleen",
+  "datalist": "$[x for d in ['imagesTr','imagesTs'] for x in sorted(__import__('glob').glob('/home/AMD/nilapate/Domains_SDK_Utils/silo-engagement/data/btcv/Task09_Spleen/'+d+'/*.nii.gz'))]",
+  "output_dir": "./eval_all"
+}

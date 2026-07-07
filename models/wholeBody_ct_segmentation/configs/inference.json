@@ -94,17 +94,8 @@
         "num_workers": 1
     },
     "inferer": {
-        "_target_": "SlidingWindowInferer",
-        "roi_size": [
-            96,
-            96,
-            96
-        ],
-        "sw_batch_size": "@displayable_configs#sw_batch_size",
-        "overlap": "@displayable_configs#sw_overlap",
-        "padding_mode": "replicate",
-        "mode": "gaussian",
-        "device": "$torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')"
+        "_target_": "scripts.timed_inferer.TimedInferer",
+        "inferer": "@base_inferer"
     },
     "postprocessing": {
         "_target_": "Compose",
@@ -166,6 +157,20 @@
         "$@checkpointloader(@evaluator) if @load_pretrain else None"
     ],
     "run": [
-        "$@evaluator.run()"
-    ]
+        "$@evaluator.run()",
+        "$@inferer.summary()"
+    ],
+    "base_inferer": {
+        "_target_": "SlidingWindowInferer",
+        "roi_size": [
+            96,
+            96,
+            96
+        ],
+        "sw_batch_size": "@displayable_configs#sw_batch_size",
+        "overlap": "@displayable_configs#sw_overlap",
+        "padding_mode": "replicate",
+        "mode": "gaussian",
+        "device": "$torch.device('cuda:0' if torch.cuda.is_available() else 'cpu')"
+    }
 }
