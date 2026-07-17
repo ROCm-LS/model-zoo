@@ -1,14 +1,15 @@
 #!/bin/bash
-# Inference timing for wholeBody_ct_segmentation
-# NVIDIA: uses inference_trt.json (pre-compiled TRT model)
-# AMD:    uses plain inference.json (PyTorch model)
-# Usage: bash run_inference.sh [--data-dir <path>]
+# Inference timing for pancreas_ct_dints_segmentation
+# NVIDIA: uses inference_trt.yaml (TRT-compiled model)
+# AMD:    uses inference_rocm.yaml (NHWC + torch.compile + bf16)
+# Data:   testing list from configs/dataset_0.json (absolute paths to Task07_Pancreas)
+# Usage:  bash run_inference.sh [--data-dir <path>]
 
 set -e
 cd "$(dirname "$0")"
 
-# Data dir — override with --data-dir if needed
-DATA_DIR="/home/AMD/nilapate/Domains_SDK_Utils/silo-engagement/data/btcv/Task09_Spleen"
+# Optional dataset_dir override (dataset_0.json already holds absolute paths).
+DATA_DIR=""
 while [[ $# -gt 0 ]]; do
     case $1 in
         --data-dir) DATA_DIR="$2"; shift 2 ;;
@@ -20,10 +21,10 @@ done
 if /usr/bin/python3 -c "import torch_tensorrt" 2>/dev/null; then
     echo "[run_inference] NVIDIA/TRT detected"
     PYTHON=/usr/bin/python3
-    EXTRA_CONFIGS="'configs/inference_trt.json',"
+    EXTRA_CONFIGS="'configs/inference_trt.yaml',"
 else
     echo "[run_inference] AMD/ROCm detected"
-    ulimit -n 1048576
+    ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
     export PYTORCH_MIOPEN_SUGGEST_NHWC=1
     export MIOPEN_USER_DB_PATH=/tmp/miopen_cache_$USER
     export MIOPEN_CUSTOM_CACHE_DIR=/tmp/miopen_cache_$USER
@@ -35,31 +36,29 @@ else
     export TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS=ATEN,TRITON
     export MIOPEN_FIND_MODE=1
     export MIOPEN_FIND_ENFORCE=4
+    export MIOPEN_ENABLE_LOGGING=0
+    export MIOPEN_ENABLE_LOGGING_CMD=0
+    export MIOPEN_LOG_LEVEL=0
+    export AMD_LOG_LEVEL=0
+    export TORCH_COMPILE_DEBUG=0
+    export TORCHINDUCTOR_VERBOSE=0
     echo "[run_inference] Using MIOpen cache dir: $MIOPEN_USER_DB_PATH"
     echo "[run_inference] Using TorchInductor cache dir: $TORCHINDUCTOR_CACHE_DIR"
     mkdir -p $MIOPEN_USER_DB_PATH
     mkdir -p $TORCHINDUCTOR_CACHE_DIR
     echo "[run_inference] Using ROCm Python: $(which python3)"
-    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE: $TORCHINDUCTOR_MAX_AUTOTUNE"
-    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE_GEMM: $TORCHINDUCTOR_MAX_AUTOTUNE_GEMM"
-    echo "[run_inference] TORCHINDUCTOR_COORDINATE_DESCENT_TUNING: $TORCHINDUCTOR_COORDINATE_DESCENT_TUNING"
-    echo "[run_inference] TORCHINDUCTOR_EPILOGUE_FUSION: $TORCHINDUCTOR_EPILOGUE_FUSION"
-    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS: $TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS"
     echo "[run_inference] MIOPEN_FIND_MODE: $MIOPEN_FIND_MODE"
     echo "[run_inference] MIOPEN_FIND_ENFORCE: $MIOPEN_FIND_ENFORCE"
     PYTHON=python3
-    EXTRA_CONFIGS="'configs/inference_rocm.json',"
+    EXTRA_CONFIGS="'configs/inference_rocm.yaml',"
 fi
 
-$PYTHON -c "
-from monai.bundle.scripts import run
-run(
-    config_file=['configs/inference.json', ${EXTRA_CONFIGS}'configs/override_all_images.json'],
-    bundle_root='.',
-    **{
-        'dataloader#num_workers': 0,
-        'dataset_dir': '${DATA_DIR}',
-        'datalist': \"\$[x for d in ['imagesTr','imagesTs'] for x in sorted(__import__('glob').glob('${DATA_DIR}/'+d+'/*.nii.gz'))]\",
-    }
-)
-"
+DATASET_OVERRIDE=""
+if [[ -n "$DATA_DIR" ]]; then
+    DATASET_OVERRIDE="--dataset_dir '$DATA_DIR'"
+fi
+
+$PYTHON -m monai.bundle run \
+    --config_file "['configs/inference.yaml', ${EXTRA_CONFIGS%,}]" \
+    --bundle_root . \
+    $DATASET_OVERRIDE

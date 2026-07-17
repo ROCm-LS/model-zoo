@@ -23,8 +23,32 @@ if /usr/bin/python3 -c "import torch_tensorrt" 2>/dev/null; then
     EXTRA_CONFIGS="'configs/inference_trt.json',"
 else
     echo "[run_inference] AMD/ROCm detected"
+    ulimit -n 1048576 2>/dev/null || ulimit -n "$(ulimit -Hn)" 2>/dev/null || true
+    export PYTORCH_MIOPEN_SUGGEST_NHWC=1
+    export MIOPEN_USER_DB_PATH=/tmp/miopen_cache_$USER
+    export MIOPEN_CUSTOM_CACHE_DIR=/tmp/miopen_cache_$USER
+    export TORCHINDUCTOR_CACHE_DIR=/tmp/inductor_cache_$USER
+    export TORCHINDUCTOR_MAX_AUTOTUNE=1
+    export TORCHINDUCTOR_MAX_AUTOTUNE_GEMM=1
+    export TORCHINDUCTOR_COORDINATE_DESCENT_TUNING=1
+    export TORCHINDUCTOR_EPILOGUE_FUSION=1
+    export TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS=ATEN,TRITON
+    export MIOPEN_FIND_MODE=1
+    export MIOPEN_FIND_ENFORCE=4
+    echo "[run_inference] Using MIOpen cache dir: $MIOPEN_USER_DB_PATH"
+    echo "[run_inference] Using TorchInductor cache dir: $TORCHINDUCTOR_CACHE_DIR"
+    mkdir -p $MIOPEN_USER_DB_PATH
+    mkdir -p $TORCHINDUCTOR_CACHE_DIR
+    echo "[run_inference] Using ROCm Python: $(which python3)"
+    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE: $TORCHINDUCTOR_MAX_AUTOTUNE"
+    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE_GEMM: $TORCHINDUCTOR_MAX_AUTOTUNE_GEMM"
+    echo "[run_inference] TORCHINDUCTOR_COORDINATE_DESCENT_TUNING: $TORCHINDUCTOR_COORDINATE_DESCENT_TUNING"
+    echo "[run_inference] TORCHINDUCTOR_EPILOGUE_FUSION: $TORCHINDUCTOR_EPILOGUE_FUSION"
+    echo "[run_inference] TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS: $TORCHINDUCTOR_MAX_AUTOTUNE_CONV_BACKENDS"
+    echo "[run_inference] MIOPEN_FIND_MODE: $MIOPEN_FIND_MODE"
+    echo "[run_inference] MIOPEN_FIND_ENFORCE: $MIOPEN_FIND_ENFORCE"
     PYTHON=python3
-    EXTRA_CONFIGS=""
+    EXTRA_CONFIGS="'configs/inference_rocm.json',"
 fi
 
 $PYTHON -c "
