@@ -1,4 +1,5 @@
 ---
+_license: "SPDX-FileCopyrightText: Copyright (C) 2026 Advanced Micro Devices, Inc. All rights reserved. SPDX-License-Identifier: Apache-2.0"
 imports:
 - "$import torch"
 arch_ckpt: "$torch.load(@arch_ckpt_path, map_location=torch.device('cuda'), weights_only=False)"
