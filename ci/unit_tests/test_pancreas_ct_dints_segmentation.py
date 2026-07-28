@@ -160,9 +160,17 @@ class TestDints(unittest.TestCase):
         bundle_root = override["bundle_root"]
         arch_name = get_searched_arch(os.path.join(bundle_root, "models"))
         override["arch_ckpt_path"] = os.path.join(bundle_root, "models", arch_name)
+        # This bundle's ROCm overlay is inference_rocm.yaml (not .json) — detect either
+        # extension so the AMD ROCm path is actually exercised, not silently skipped.
+        infer_cfg = [os.path.join(bundle_root, "configs/inference.yaml")]
+        for _ext in ("json", "yaml"):
+            _rocm = os.path.join(bundle_root, f"configs/inference_rocm.{_ext}")
+            if os.path.exists(_rocm):
+                infer_cfg.append(_rocm)
+                break
         inferrer = ConfigWorkflow(
             workflow_type="infer",
-            config_file=os.path.join(bundle_root, "configs/inference.yaml"),
+            config_file=infer_cfg,
             logging_file=os.path.join(bundle_root, "configs/logging.conf"),
             meta_file=os.path.join(bundle_root, "configs/metadata.json"),
             **override,

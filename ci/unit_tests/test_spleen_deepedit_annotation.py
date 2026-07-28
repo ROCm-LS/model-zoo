@@ -114,7 +114,7 @@ class TestDeepeditAnno(unittest.TestCase):
 
         inferrer = ConfigWorkflow(
             workflow_type="infer",
-            config_file=os.path.join(bundle_root, "configs/inference.json"),
+            config_file=[os.path.join(bundle_root, "configs/inference.json")] + ([os.path.join(bundle_root, "configs/inference_rocm.json")] if os.path.exists(os.path.join(bundle_root, "configs/inference_rocm.json")) else []),
             logging_file=os.path.join(bundle_root, "configs/logging.conf"),
             meta_file=os.path.join(bundle_root, "configs/metadata.json"),
             **override,
@@ -132,7 +132,7 @@ class TestDeepeditAnno(unittest.TestCase):
 
         inferrer = ConfigWorkflow(
             workflow_type="infer",
-            config_file=os.path.join(bundle_root, "configs/inference.json"),
+            config_file=[os.path.join(bundle_root, "configs/inference.json")] + ([os.path.join(bundle_root, "configs/inference_rocm.json")] if os.path.exists(os.path.join(bundle_root, "configs/inference_rocm.json")) else []),
             logging_file=os.path.join(bundle_root, "configs/logging.conf"),
             meta_file=os.path.join(bundle_root, "configs/metadata.json"),
             **override,

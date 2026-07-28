@@ -234,7 +234,7 @@ class Vista3dEvaluator(SupervisedEvaluator):
                 points = self.transform_points(
                     points, np.linalg.inv(inputs.affine[0]) @ inputs.meta["original_affine"][0].numpy()
                 )
-                points = torch.from_numpy(points).to(inputs.device)
+                points = torch.as_tensor(points).to(inputs.device)
             point_labels = torch.as_tensor([point_labels]).to(inputs.device) if point_labels is not None else None
 
         # If validation with ground truth label available.

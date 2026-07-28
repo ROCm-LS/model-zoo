@@ -114,9 +114,13 @@ class TestSwinUnetr(unittest.TestCase):
         override["dataset_dir"] = self.dataset_dir
         bundle_root = override["bundle_root"]
 
+        infer_cfg = [os.path.join(bundle_root, "configs/inference.json")]
+        rocm_cfg = os.path.join(bundle_root, "configs/inference_rocm.json")
+        if os.path.exists(rocm_cfg):
+            infer_cfg.append(rocm_cfg)
         inferrer = ConfigWorkflow(
             workflow_type="infer",
-            config_file=os.path.join(bundle_root, "configs/inference.json"),
+            config_file=infer_cfg,
             logging_file=os.path.join(bundle_root, "configs/logging.conf"),
             meta_file=os.path.join(bundle_root, "configs/metadata.json"),
             **override,

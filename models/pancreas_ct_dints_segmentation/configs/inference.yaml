@@ -6,7 +6,7 @@ imports:
 input_channels: 1
 output_classes: 3
 arch_ckpt_path: "$@bundle_root + '/models/search_code_18590.pt'"
-arch_ckpt: "$torch.load(@arch_ckpt_path, map_location=torch.device('cuda'))"
+arch_ckpt: "$torch.load(@arch_ckpt_path, map_location=torch.device('cuda'), weights_only=False)"
 bundle_root: "."
 image_key: "image"
 output_dir: "$@bundle_root + '/eval'"
